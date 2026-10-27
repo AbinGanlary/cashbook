@@ -21,7 +21,7 @@ const Forms = lazy(() => import('./components/Forms/Forms'));
 import { INITIAL_ACCOUNT_CODES } from './constants';
 import { formatClaimNo, fmtDate, safeStorage, sectionKey, resizeImageToDataURL, claimLabel, normalizeTransactions } from './utils';
 import { useCashbookSync } from './hooks/useCashbookSync';
-import { buildSampleTransactions } from './sampleData';
+import { buildSampleData } from './sampleData';
 
 function AppInner() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -671,10 +671,11 @@ function AppInner() {
       message: 'This replaces all transactions and generated bills with a small demo ledger. Export a backup first if you want to keep your current data.',
       confirmLabel: 'Load Sample Data',
       onConfirm: () => {
-        setTransactions(buildSampleTransactions());
+        const sample = buildSampleData();
+        setTransactions(sample.transactions);
         setGeneratedBills([]);
         setBrsRecords([]);
-        setPreviousClaims([]);
+        setPreviousClaims(sample.previousClaims);
         setConfirmBox(prev => ({ ...prev, isOpen: false }));
         setMsgBox({ isOpen: true, type: 'success', title: 'Sample Data Loaded', message: 'A demo ledger for the last two months is ready. Try the Expenses, Summary and Bills tabs.' });
       }

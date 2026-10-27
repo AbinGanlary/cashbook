@@ -4,7 +4,13 @@ A desktop petty-cash and imprest accounting app. It keeps a cash/bank ledger, tu
 
 Built with **React 19 + Vite + Tailwind 4** on the front end and **Tauri 2 (Rust)** for the desktop shell and an embedded LAN sync server.
 
-<!-- Add screenshots here: docs/screenshots/dashboard.png, summary.png, brs.png -->
+![Dashboard](docs/screenshots/dashboard.jpg)
+
+| Expense statement | Summary letter with imprest check |
+| --- | --- |
+| ![Expenses](docs/screenshots/expenses.jpg) | ![Summary](docs/screenshots/summary.jpg) |
+
+*Screenshots use the built-in sample data (Settings → Load Sample Data); all names and figures are made up.*
 
 ## Features
 

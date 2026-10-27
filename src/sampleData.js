@@ -3,14 +3,14 @@
 // a recent month to show; ids are creation-style timestamps, like real entries.
 const iso = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
-export function buildSampleTransactions(now = new Date()) {
+export function buildSampleData(now = new Date()) {
   const y = now.getFullYear();
   const m = now.getMonth() + 1;
   const prevY = m === 1 ? y - 1 : y;
   const prevM = m === 1 ? 12 : m - 1;
 
   const rows = [
-    [iso(prevY, prevM, 1), 'Imprest claim received from HQ', 'Receipt', 'Bank', 400000, 'NONE'],
+    [iso(prevY, prevM, 1), 'Imprest claim received from HQ', 'Receipt', 'Bank', 600000, 'NONE'],
     [iso(prevY, prevM, 2), 'Cash withdrawn for petty expenses', 'Contra', null, 50000, 'NONE'],
     [iso(prevY, prevM, 4), 'Broadband - monthly bill', 'Payment', 'Bank', 4720, 'TEL01'],
     [iso(prevY, prevM, 6), 'Alex Morgan - stationery purchase', 'Payment', 'Cash', 2350, 'SUP02'],
@@ -25,10 +25,25 @@ export function buildSampleTransactions(now = new Date()) {
   ];
 
   const base = Date.now() - rows.length * 1000;
-  return rows.map(([date, particulars, type, mode, amount, accountCode], i) => ({
+  const transactions = rows.map(([date, particulars, type, mode, amount, accountCode], i) => ({
     id: String(base + i),
     date, particulars, type, mode, amount, accountCode,
     isAdjustment: false,
     expenseSerial: null,
   }));
+
+  // Last month's expenses are still awaiting reimbursement, so they go in as a
+  // pending claim — that makes the Summary's imprest check (cash + bank +
+  // replenishment + pending claims = imprest) come out to zero difference.
+  const prefix = `${prevY}-${String(prevM).padStart(2, '0')}`;
+  const pendingAmount = rows
+    .filter(([date, , type]) => type === 'Payment' && date.startsWith(prefix))
+    .reduce((sum, row) => sum + row[4], 0);
+  const previousClaims = [{
+    id: String(base + rows.length),
+    description: `Claim ${String(prevM).padStart(2, '0')}/${prevY} - pending reimbursement`,
+    amount: pendingAmount,
+  }];
+
+  return { transactions, previousClaims };
 }
