@@ -1,0 +1,38 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#DE8A4C"/>
+      <stop offset="100%" stop-color="#A8622E"/>
+    </linearGradient>
+    <linearGradient id="coin" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8FA377"/>
+      <stop offset="100%" stop-color="#5E7247"/>
+    </linearGradient>
+  </defs>
+
+  <!-- rounded squircle background -->
+  <rect x="0" y="0" width="512" height="512" rx="112" ry="112" fill="url(#bg)"/>
+
+  <!-- bookmark tab -->
+  <rect x="247" y="108" width="26" height="52" rx="4" fill="#6E8A56"/>
+
+  <!-- notebook body -->
+  <rect x="132" y="150" width="248" height="204" rx="18" fill="#F4EDE1"/>
+
+  <!-- spine -->
+  <rect x="255" y="150" width="6" height="204" rx="3" fill="#6B4A32"/>
+
+  <!-- left page lines -->
+  <rect x="158" y="192" width="88" height="8" rx="4" fill="#B29A82"/>
+  <rect x="158" y="220" width="88" height="8" rx="4" fill="#B29A82"/>
+  <rect x="158" y="248" width="68" height="8" rx="4" fill="#B29A82"/>
+
+  <!-- right page lines -->
+  <rect x="266" y="192" width="88" height="8" rx="4" fill="#B29A82"/>
+  <rect x="266" y="220" width="88" height="8" rx="4" fill="#B29A82"/>
+  <rect x="266" y="248" width="68" height="8" rx="4" fill="#B29A82"/>
+
+  <!-- coin badge -->
+  <circle cx="372" cy="372" r="50" fill="url(#coin)"/>
+  <text x="372" y="392" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700" fill="#FFFFFF" text-anchor="middle">$</text>
+</svg>

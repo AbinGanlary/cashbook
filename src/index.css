@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+/* Tell Tailwind v4 to use our custom .dark class for dark mode */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Force exact colors when printing / exporting to PDF.
+   Without this, Chrome's print "economy mode" lightens text and
+   drops background colors to save ink, making everything look
+   washed-out gray regardless of the Tailwind classes applied. */
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  /* Cover the whole page in white — otherwise the app's screen
+     background (gray-50 / dark slate) shows through wherever the
+     printed content is shorter than the page, leaving a gray strip
+     at the bottom (or sides) of the printout. */
+  html, body, #root {
+    background: #fff !important;
+    min-height: 100% !important;
+  }
+
+  /* Force A4 regardless of the OS/printer's default paper size,
+     so alignment is consistent across machines. */
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  /* Wide ledger tables (Transactions, Expenses) don't fit their
+     columns within A4 portrait's usable width — print them
+     landscape instead so nothing gets clipped on the right edge. */
+  @page wide {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+  .print-landscape {
+    page: wide;
+  }
+}
