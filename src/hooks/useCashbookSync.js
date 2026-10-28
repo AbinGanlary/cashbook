@@ -58,6 +58,10 @@ export function useCashbookSync({ network, stores, hasLocalData, onOverwriteProm
   const applyIncoming = useCallback((key, value) => {
     const store = storesRef.current[key];
     if (!store) return;
+    // The host only holds what some client PUT there; don't let a malformed
+    // value (wrong shape) reach React state and crash the app.
+    const wantsObject = key === 'settings';
+    if (wantsObject ? (!value || typeof value !== 'object' || Array.isArray(value)) : !Array.isArray(value)) return;
     if (key === 'settings') {
       const merged = { ...store.value, ...value, network: store.value.network, pettyCashVoucher: store.value.pettyCashVoucher };
       lastSynced.current[key] = JSON.stringify(stripLocalOnlySettings(merged));

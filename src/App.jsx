@@ -19,8 +19,9 @@ import BrsItemTable from './components/BrsItemTable';
 const VendorBills = lazy(() => import('./components/VendorBills/VendorBills'));
 const Forms = lazy(() => import('./components/Forms/Forms'));
 import { INITIAL_ACCOUNT_CODES } from './constants';
-import { formatClaimNo, fmtDate, safeStorage, sectionKey, resizeImageToDataURL, claimLabel, normalizeTransactions } from './utils';
+import { formatClaimNo, fmtDate, safeStorage, sectionKey, resizeImageToDataURL, claimLabel, normalizeTransactions, generatePin, MIN_PIN_LENGTH } from './utils';
 import { useCashbookSync } from './hooks/useCashbookSync';
+import { sanitizeHtml } from './utils/sanitizeHtml';
 import { buildSampleData } from './sampleData';
 
 function AppInner() {
@@ -505,11 +506,11 @@ function AppInner() {
   const applyFooterFormat = (command, value = null) => {
     voucherFooterRef.current?.focus();
     document.execCommand(command, false, value);
-    setAppSettings(prev => ({ ...prev, pettyCashVoucher: { ...(prev.pettyCashVoucher || {}), footerHtml: voucherFooterRef.current?.innerHTML || '' } }));
+    setAppSettings(prev => ({ ...prev, pettyCashVoucher: { ...(prev.pettyCashVoucher || {}), footerHtml: sanitizeHtml(voucherFooterRef.current?.innerHTML || '') } }));
   };
 
   const handleFooterInput = () => {
-    setAppSettings(prev => ({ ...prev, pettyCashVoucher: { ...(prev.pettyCashVoucher || {}), footerHtml: voucherFooterRef.current?.innerHTML || '' } }));
+    setAppSettings(prev => ({ ...prev, pettyCashVoucher: { ...(prev.pettyCashVoucher || {}), footerHtml: sanitizeHtml(voucherFooterRef.current?.innerHTML || '') } }));
   };
 
   const handleClearFooter = () => {
@@ -539,7 +540,7 @@ function AppInner() {
 
   const updateNetwork = (patch) => setAppSettings(prev => ({ ...prev, network: { ...prev.network, ...patch } }));
 
-  const handleGeneratePin = () => updateNetwork({ pin: String(Math.floor(100000 + Math.random() * 900000)) });
+  const handleGeneratePin = () => updateNetwork({ pin: generatePin() });
 
   const handleStopHostServer = useCallback(async () => {
     if (!isTauriRuntime()) return;
@@ -560,12 +561,12 @@ function AppInner() {
     cashbookSync.stopSync();
     setServerError('');
     setClientTest({ testing: false, connected: null, error: '' });
-    updateNetwork({ mode, pin: appSettings.network.pin || (mode === 'host' ? String(Math.floor(100000 + Math.random() * 900000)) : '') });
+    updateNetwork({ mode, pin: appSettings.network.pin || (mode === 'host' ? generatePin() : '') });
   };
 
   const handleStartHostServer = async () => {
     if (!isTauriRuntime()) { setServerError('Network Sync requires the desktop app — this preview is running in a plain browser.'); return; }
-    if (!appSettings.network.pin.trim()) { setServerError('Set a PIN first.'); return; }
+    if (appSettings.network.pin.trim().length < MIN_PIN_LENGTH) { setServerError(`Use a PIN of at least ${MIN_PIN_LENGTH} characters (Generate makes a strong one).`); return; }
     setServerBusy(true); setServerError('');
     try {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -613,7 +614,10 @@ function AppInner() {
 
   const handleExportCSV = (data, filename) => {
     const csvString = data.map(row => row.map(cell => {
-      const val = cell === null || cell === undefined ? '' : String(cell);
+      let val = cell === null || cell === undefined ? '' : String(cell);
+      // Text starting with = + - @ is run as a formula when the CSV is opened in
+      // Excel; a leading apostrophe makes it plain text. Real numbers are left alone.
+      if (typeof cell === 'string' && /^[=+\-@\t\r]/.test(val)) val = `'${val}`;
       return `"${val.replace(/"/g, '""')}"`;
     }).join(',')).join('\n');
     const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
@@ -642,19 +646,23 @@ function AppInner() {
     reader.onload = (event) => {
       try {
         const importedData = JSON.parse(event.target.result);
-        if (importedData.appSettings && importedData.transactions) {
+        if (importedData.appSettings && typeof importedData.appSettings === 'object' && Array.isArray(importedData.transactions)) {
           setAppSettings(prev => ({
             ...prev, ...importedData.appSettings,
             signatories: { ...(prev.signatories || {}), ...(importedData.appSettings.signatories || {}) },
-            pettyCashVoucher: { ...(prev.pettyCashVoucher || {}), ...(importedData.appSettings.pettyCashVoucher || {}) },
+            pettyCashVoucher: {
+              ...(prev.pettyCashVoucher || {}), ...(importedData.appSettings.pettyCashVoucher || {}),
+              // A backup is untrusted input: never keep markup that was not produced by the editor.
+              footerHtml: sanitizeHtml(importedData.appSettings.pettyCashVoucher?.footerHtml || prev.pettyCashVoucher?.footerHtml || ''),
+            },
             // Network config is this machine's own identity (host IP/PIN), not
             // portable data — never let an imported backup from another PC overwrite it.
             network: prev.network
           }));
-          if (importedData.accountCodes) setAccountCodes(importedData.accountCodes);
-          if (importedData.generatedBills) setGeneratedBills(importedData.generatedBills);
-          if (importedData.brsRecords) setBrsRecords(importedData.brsRecords);
-          if (importedData.previousClaims) setPreviousClaims(importedData.previousClaims);
+          if (Array.isArray(importedData.accountCodes)) setAccountCodes(importedData.accountCodes);
+          if (Array.isArray(importedData.generatedBills)) setGeneratedBills(importedData.generatedBills);
+          if (Array.isArray(importedData.brsRecords)) setBrsRecords(importedData.brsRecords);
+          if (Array.isArray(importedData.previousClaims)) setPreviousClaims(importedData.previousClaims);
           setTransactions(normalizeTransactions(importedData.transactions));
           setMsgBox({ isOpen: true, type: 'success', title: 'Import Successful', message: 'Database restored successfully.' });
         } else throw new Error('Invalid format');
@@ -694,15 +702,8 @@ function AppInner() {
     handleExportCSV([headers, ...rows], "expense_statement.csv");
   };
 
-  // --- SHEETJS CDN LOADER ---
-  const loadXLSX = () => new Promise((resolve, reject) => {
-    if (window.XLSX) return resolve(window.XLSX);
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-    script.onload = () => resolve(window.XLSX);
-    script.onerror = () => reject(new Error('Failed to load SheetJS'));
-    document.head.appendChild(script);
-  });
+  // --- SHEETJS (bundled, loaded on first export so it stays out of the main chunk) ---
+  const loadXLSX = () => import('xlsx');
 
   // --- Helper: compute ledger data for a given bill ---
   // Only includes transactions that existed at the time the bill was generated
@@ -828,7 +829,7 @@ function AppInner() {
       // Download
       XLSX.writeFile(wb, `Cashbook_Claim_${claimNoStr.replace('/', '-')}_${periodLabel.replace(/\s/g, '_')}.xlsx`);
     } catch {
-      setMsgBox({ isOpen: true, type: 'error', title: 'Export Failed', message: 'Could not generate Excel file. Please check your internet connection for SheetJS.' });
+      setMsgBox({ isOpen: true, type: 'error', title: 'Export Failed', message: 'Could not generate the Excel file.' });
     }
   };
 
@@ -1043,7 +1044,7 @@ function AppInner() {
       }
       XLSX.writeFile(wb, `BRS_Annual_${year}.xlsx`);
     } catch {
-      setMsgBox({ isOpen: true, type: 'error', title: 'Export Failed', message: 'Could not generate Excel. Check internet connection for SheetJS.' });
+      setMsgBox({ isOpen: true, type: 'error', title: 'Export Failed', message: 'Could not generate the Excel file.' });
     }
   };
 
@@ -1123,7 +1124,7 @@ function AppInner() {
       XLSX.utils.book_append_sheet(wb, wsBrs, 'BRS');
       XLSX.writeFile(wb, `BRS_Claim_${claimNo.replace('/', '-')}.xlsx`);
     } catch {
-      setMsgBox({ isOpen: true, type: 'error', title: 'Export Failed', message: 'Could not generate Excel. Check internet connection for SheetJS.' });
+      setMsgBox({ isOpen: true, type: 'error', title: 'Export Failed', message: 'Could not generate the Excel file.' });
     }
   };
 
@@ -3298,7 +3299,7 @@ function AppInner() {
                           <button type="button" onMouseDown={e => e.preventDefault()} onClick={handleClearFooter} title="Clear" className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-slate-600 text-gray-400"><Trash2 size={14} /></button>
                         </div>
                         <div
-                          ref={el => { voucherFooterRef.current = el; if (el && !el.dataset.init) { el.innerHTML = appSettings.pettyCashVoucher?.footerHtml || ''; el.dataset.init = '1'; } }}
+                          ref={el => { voucherFooterRef.current = el; if (el && !el.dataset.init) { el.innerHTML = sanitizeHtml(appSettings.pettyCashVoucher?.footerHtml || ''); el.dataset.init = '1'; } }}
                           contentEditable
                           suppressContentEditableWarning
                           onInput={handleFooterInput}

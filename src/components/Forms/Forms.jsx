@@ -3,6 +3,7 @@ import { Plus, Trash2, Printer, ChevronLeft, X, Wallet, Search } from 'lucide-re
 import { dbGetAll, dbPut, dbDelete } from './formsDb.js';
 import { uid, todayISO, numberToWords, dateDMY } from '../../utils/format.js';
 import { resolveAmountExpression, newTxId } from '../../utils';
+import { sanitizeHtml } from '../../utils/sanitizeHtml.js';
 
 const DEFAULT_PAYEES = [
   'Alex Morgan', 'Priya Sharma', 'Rahul Verma', 'Sam Carter', 'Neha Singh', 'Jordan Lee',
@@ -228,7 +229,7 @@ function VoucherEditor({ voucher, voucherNo, payees, particularsOptions, account
           // 2in of real space (not rem/px) so it holds when printed regardless of
           // screen zoom — room to physically stamp the voucher below the signatures.
           <div className="pt-3 border-t border-gray-300 text-xs text-center [&_a]:no-underline" style={{ marginTop: '2in' }}
-            dangerouslySetInnerHTML={{ __html: branding.footerHtml }} />
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(branding.footerHtml) }} />
         )}
       </div>
     </div>

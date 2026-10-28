@@ -4,10 +4,10 @@
   "version": "0.9.3",
   "identifier": "dev.cashbook.app",
   "build": {
-  "beforeDevCommand": "npm run dev",
-  "beforeBuildCommand": "npm run build",
-  "devUrl": "http://localhost:5173",
-  "frontendDist": "../dist"
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [
@@ -20,7 +20,8 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http: ws:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http: ws:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'"
     }
   },
   "bundle": {
@@ -35,4 +36,3 @@
     ]
   }
 }
-

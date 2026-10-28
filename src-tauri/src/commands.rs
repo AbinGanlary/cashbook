@@ -3,6 +3,9 @@ use serde::Serialize;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 
+/// Short PINs fall to guessing; the UI generates 8 digits, this is the floor.
+const MIN_PIN_LEN: usize = 6;
+
 struct HostHandle {
     shutdown_tx: tokio::sync::oneshot::Sender<()>,
     port: u16,
@@ -33,8 +36,8 @@ pub async fn start_host_server(
     pin: String,
     port: u16,
 ) -> Result<ServerStatusDto, String> {
-    if pin.trim().is_empty() {
-        return Err("PIN cannot be empty".into());
+    if pin.trim().len() < MIN_PIN_LEN {
+        return Err(format!("PIN must be at least {MIN_PIN_LEN} characters"));
     }
     if state.host.lock().unwrap().is_some() {
         return Err("Server is already running — stop it first.".into());

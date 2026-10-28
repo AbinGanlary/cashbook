@@ -62,11 +62,19 @@ Server tests: `cd src-tauri && cargo test`.
 
 Open *Settings → Load Sample Data* for a demo ledger.
 
-> The Excel export loads SheetJS from a CDN, so it needs an internet connection.
+Frontend tests: `npm test`.
 
-## Security note
+## Security
 
-LAN sync uses a shared PIN over plain HTTP. Use it on a trusted network only.
+CashBook is a local-first app; the only network surface is the optional LAN sync server, which is off unless you turn on Host mode.
+
+- **PIN protected.** Every data request needs the host's PIN (8 digits when generated, 6 characters minimum). Wrong guesses are counted per address and, after 5, that address is locked out for 5 minutes. PINs are compared in constant time and requests are authenticated before their bodies are read.
+- **Locked-down origins.** Only the app's own webview may call the server from a browser context, so a web page open elsewhere on your network can't use it. WebSocket handshakes from other origins are refused.
+- **Untrusted input is sanitised.** Rich-text footers (typed or restored from a backup) go through an allow-list sanitiser, and the app ships with a strict Content-Security-Policy: no inline scripts, no remote scripts. SheetJS is bundled rather than loaded from a CDN.
+- **Spreadsheet exports** neutralise cells that start with `=`, `+`, `-` or `@` so they can't run as formulas.
+- **Known limits.** Sync is plain HTTP, so the PIN and data are visible to anyone who can sniff your network: use it on a trusted LAN only. Data is stored unencrypted on disk, as in most local apps.
+
+Found something? Please open an issue.
 
 ## License
 

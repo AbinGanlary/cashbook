@@ -52,6 +52,16 @@ export const normalizeTxAmounts = (list) => {
 export const normalizeTransactions = (list) => normalizeTxAmounts(normalizeTxIds(list));
 
 
+// LAN-sync PINs: anything shorter is too easy to guess, and generated ones come
+// from the browser's secure random source (not Math.random) as 8 digits.
+export const MIN_PIN_LENGTH = 6;
+export const generatePin = () => {
+  const buf = new Uint32Array(1);
+  crypto.getRandomValues(buf);
+  return String(10000000 + (buf[0] % 90000000));
+};
+
+
 // Previous / Pending Claim entries are signed numbers: a negative amount is a
 // "Less" line (e.g. extra funds received from HQ that must be deducted so the
 // summary still reconciles to the imprest). Prefix it unless already worded as one.

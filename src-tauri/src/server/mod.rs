@@ -5,17 +5,22 @@ pub mod state;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Path, Query, State,
+        ConnectInfo, DefaultBodyLimit, Path, Query, Request, State,
     },
-    http::{HeaderMap, StatusCode},
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
     Json, Router,
 };
 use serde_json::{json, Value};
-use state::{ChangeEvent, ServerState};
+use state::{AuthOutcome, ChangeEvent, ServerState};
 use std::collections::HashMap;
-use tower_http::cors::CorsLayer;
+use std::net::SocketAddr;
+use tower_http::cors::{AllowOrigin, CorsLayer};
+
+/// Largest request body accepted (the full ledger is sent as one JSON blob).
+const MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
 
 fn err(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({ "error": message }))).into_response()
@@ -25,31 +30,54 @@ fn pin_from_headers(headers: &HeaderMap) -> Option<&str> {
     headers.get("x-cashbook-pin").and_then(|v| v.to_str().ok())
 }
 
+/// Origins a browser may call this server from: the app's own webview (Tauri
+/// serves it as http://tauri.localhost on Windows, tauri://localhost elsewhere)
+/// and, in debug builds only, the Vite dev server. Any other web page — e.g. a
+/// site open in a browser on the same network — gets no CORS access.
+fn is_allowed_origin(origin: &str) -> bool {
+    const APP_ORIGINS: &[&str] = &["http://tauri.localhost", "https://tauri.localhost", "tauri://localhost"];
+    const DEV_ORIGINS: &[&str] = &["http://localhost:5173", "http://127.0.0.1:5173"];
+    APP_ORIGINS.contains(&origin) || (cfg!(debug_assertions) && DEV_ORIGINS.contains(&origin))
+}
+
+fn auth_failure(outcome: AuthOutcome) -> Response {
+    match outcome {
+        AuthOutcome::Locked => err(StatusCode::TOO_MANY_REQUESTS, "Too many wrong PINs — try again in a few minutes"),
+        _ => err(StatusCode::UNAUTHORIZED, "Invalid or missing PIN"),
+    }
+}
+
+/// Runs before any /api/data handler, so a request is authenticated (and wrong
+/// guesses are counted) before its body is read or parsed.
+async fn require_pin(
+    State(state): State<ServerState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request,
+    next: Next,
+) -> Response {
+    match state.authenticate(addr.ip(), pin_from_headers(req.headers())) {
+        AuthOutcome::Allowed => next.run(req).await,
+        denied => auth_failure(denied),
+    }
+}
+
 async fn ping() -> impl IntoResponse {
     Json(json!({ "status": "ok", "app": "cashbook-server" }))
 }
 
-async fn get_all_data(State(state): State<ServerState>, headers: HeaderMap) -> Response {
-    match pin_from_headers(&headers) {
-        Some(p) if state.check_pin(p) => {}
-        _ => return err(StatusCode::UNAUTHORIZED, "Invalid or missing PIN"),
-    }
-    let conn = state.db.lock().unwrap();
+async fn get_all_data(State(state): State<ServerState>) -> Response {
+    let conn = state.db();
     match db::get_all(&conn) {
         Ok(map) => Json(map).into_response(),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
-async fn get_one(State(state): State<ServerState>, headers: HeaderMap, Path(key): Path<String>) -> Response {
-    match pin_from_headers(&headers) {
-        Some(p) if state.check_pin(p) => {}
-        _ => return err(StatusCode::UNAUTHORIZED, "Invalid or missing PIN"),
-    }
+async fn get_one(State(state): State<ServerState>, Path(key): Path<String>) -> Response {
     if !db::ALLOWED_KEYS.contains(&key.as_str()) {
         return err(StatusCode::BAD_REQUEST, "Unknown data key");
     }
-    let conn = state.db.lock().unwrap();
+    let conn = state.db();
     match db::get(&conn, &key) {
         Ok(Some(raw)) => {
             let value: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
@@ -60,22 +88,13 @@ async fn get_one(State(state): State<ServerState>, headers: HeaderMap, Path(key)
     }
 }
 
-async fn put_one(
-    State(state): State<ServerState>,
-    headers: HeaderMap,
-    Path(key): Path<String>,
-    Json(value): Json<Value>,
-) -> Response {
-    match pin_from_headers(&headers) {
-        Some(p) if state.check_pin(p) => {}
-        _ => return err(StatusCode::UNAUTHORIZED, "Invalid or missing PIN"),
-    }
+async fn put_one(State(state): State<ServerState>, Path(key): Path<String>, Json(value): Json<Value>) -> Response {
     if !db::ALLOWED_KEYS.contains(&key.as_str()) {
         return err(StatusCode::BAD_REQUEST, "Unknown data key");
     }
     let raw = value.to_string();
     let write_result = {
-        let conn = state.db.lock().unwrap();
+        let conn = state.db();
         db::put(&conn, &key, &raw)
     };
     match write_result {
@@ -89,15 +108,26 @@ async fn put_one(
 }
 
 async fn ws_handler(
-    ws: WebSocketUpgrade,
+    ws: Option<WebSocketUpgrade>,
     State(state): State<ServerState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
-    let pin_ok = params.get("pin").map(|p| state.check_pin(p)).unwrap_or(false);
-    if !pin_ok {
-        return err(StatusCode::UNAUTHORIZED, "Invalid or missing PIN");
+    // Browsers attach an Origin to WebSocket handshakes and don't apply CORS to
+    // them, so refuse foreign pages here (non-browser clients send no Origin).
+    if let Some(origin) = headers.get(header::ORIGIN) {
+        if !origin.to_str().map(is_allowed_origin).unwrap_or(false) {
+            return err(StatusCode::FORBIDDEN, "Origin not allowed");
+        }
     }
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
+    match state.authenticate(addr.ip(), params.get("pin").map(String::as_str)) {
+        AuthOutcome::Allowed => match ws {
+            Some(ws) => ws.on_upgrade(move |socket| handle_socket(socket, state)),
+            None => err(StatusCode::BAD_REQUEST, "Expected a WebSocket upgrade"),
+        },
+        denied => auth_failure(denied),
+    }
 }
 
 async fn handle_socket(mut socket: WebSocket, state: ServerState) {
@@ -114,15 +144,28 @@ async fn handle_socket(mut socket: WebSocket, state: ServerState) {
 }
 
 pub fn router(state: ServerState) -> Router {
-    Router::new()
-        .route("/api/ping", get(ping))
+    // allow_private_network answers Chromium's Private Network Access preflight,
+    // which WebView2 enforces when the app's webview calls a LAN IP like this —
+    // safe now that only the app's own origins are allowed at all.
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
+            origin.to_str().map(is_allowed_origin).unwrap_or(false)
+        }))
+        .allow_methods([Method::GET, Method::PUT, Method::OPTIONS])
+        .allow_headers([header::CONTENT_TYPE, header::HeaderName::from_static("x-cashbook-pin")])
+        .allow_private_network(true);
+
+    let data = Router::new()
         .route("/api/data", get(get_all_data))
         .route("/api/data/:key", get(get_one).put(put_one))
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_pin));
+
+    Router::new()
+        .route("/api/ping", get(ping))
         .route("/ws", get(ws_handler))
-        // permissive() covers the ordinary cross-origin case; allow_private_network
-        // additionally satisfies Chromium's Private Network Access preflight, which
-        // WebView2 enforces when a client's webview calls out to a LAN IP like this.
-        .layer(CorsLayer::permissive().allow_private_network(true))
+        .merge(data)
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .layer(cors)
         .with_state(state)
 }
 
@@ -141,7 +184,7 @@ pub async fn run(
     state: ServerState,
     shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(), String> {
-    let app = router(state);
+    let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = shutdown_rx.await;
@@ -270,6 +313,73 @@ mod tests {
             .unwrap();
         let got: HashMap<String, Value> = resp.json().await.unwrap();
         assert!(got.contains_key("codes"));
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn repeated_wrong_pins_lock_the_address_out() {
+        let (base, shutdown) = spawn_test_server("123456").await;
+        let client = reqwest::Client::new();
+        for _ in 0..state::MAX_FAILED_ATTEMPTS - 1 {
+            let resp = client.get(format!("{base}/api/data")).header("x-cashbook-pin", "000000").send().await.unwrap();
+            assert_eq!(resp.status(), 401);
+        }
+        let locking = client.get(format!("{base}/api/data")).header("x-cashbook-pin", "000000").send().await.unwrap();
+        assert_eq!(locking.status(), 429);
+        let right_pin = client.get(format!("{base}/api/data")).header("x-cashbook-pin", "123456").send().await.unwrap();
+        assert_eq!(right_pin.status(), 429);
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_requests_are_rejected_before_the_body_is_parsed() {
+        let (base, shutdown) = spawn_test_server("123456").await;
+        let client = reqwest::Client::new();
+        let resp = client
+            .put(format!("{base}/api/data/transactions"))
+            .header("content-type", "application/json")
+            .body("this is not json")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 401); // not 400/422 — auth runs first
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn cors_allows_only_the_apps_own_origins() {
+        let (base, shutdown) = spawn_test_server("123456").await;
+        let client = reqwest::Client::new();
+
+        let foreign = client.get(format!("{base}/api/ping")).header("origin", "https://evil.example").send().await.unwrap();
+        assert!(foreign.headers().get("access-control-allow-origin").is_none());
+
+        let own = client.get(format!("{base}/api/ping")).header("origin", "http://tauri.localhost").send().await.unwrap();
+        assert_eq!(own.headers().get("access-control-allow-origin").unwrap(), "http://tauri.localhost");
+
+        let preflight = client
+            .request(reqwest::Method::OPTIONS, format!("{base}/api/data"))
+            .header("origin", "http://tauri.localhost")
+            .header("access-control-request-method", "GET")
+            .header("access-control-request-headers", "x-cashbook-pin")
+            .send()
+            .await
+            .unwrap();
+        assert!(preflight.status().is_success()); // preflight needs no PIN
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn websocket_handshake_from_a_foreign_origin_is_refused() {
+        let (base, shutdown) = spawn_test_server("123456").await;
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(format!("{base}/ws?pin=123456"))
+            .header("origin", "https://evil.example")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 403);
         let _ = shutdown.send(());
     }
 }
