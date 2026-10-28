@@ -1,6 +1,6 @@
 [package]
 name = "cashbook"
-version = "0.9.3"
+version = "0.9.4"
 description = "Petty cash and imprest accounting desktop app with LAN sync"
 authors = []
 license = "MIT"

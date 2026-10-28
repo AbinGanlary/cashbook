@@ -3,7 +3,7 @@
   "description": "Petty cash and imprest accounting desktop app (React + Tauri) with LAN sync",
   "license": "MIT",
   "private": true,
-  "version": "0.9.3",
+  "version": "0.9.4",
   "type": "module",
   "scripts": {
     "dev": "vite",

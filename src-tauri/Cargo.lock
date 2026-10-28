@@ -428,7 +428,7 @@ dependencies = [
 
 [[package]]
 name = "cashbook"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "axum",
  "log",
